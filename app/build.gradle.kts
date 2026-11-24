@@ -1,4 +1,15 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.io.File
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.ConfigurableFileCollection
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.TaskAction
 
 plugins {
   alias(libs.plugins.android.application)
@@ -141,4 +152,68 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
   // "ksp"(libs.moshi.kotlin.codegen)
+}
+
+abstract class BundleProjectSourcesTask : DefaultTask() {
+  @get:Input abstract val rootDirPath: Property<String>
+
+  @get:InputFiles
+  @get:PathSensitive(PathSensitivity.RELATIVE)
+  abstract val sourceFiles: ConfigurableFileCollection
+
+  @get:OutputDirectory abstract val outputDir: DirectoryProperty
+
+  @TaskAction
+  fun bundleSources() {
+    val rootDir = File(rootDirPath.get()).canonicalFile
+    val outRoot = outputDir.get().asFile
+    if (outRoot.exists()) {
+      outRoot.deleteRecursively()
+    }
+    val sourceOut = File(outRoot, "project_source").apply { mkdirs() }
+    val manifestEntries = mutableListOf<String>()
+
+    sourceFiles.files
+      .filter { it.isFile && it.exists() }
+      .sortedBy { it.canonicalPath }
+      .forEach { file ->
+        val relPath = file.canonicalFile.relativeTo(rootDir).invariantSeparatorsPath
+        if (!relPath.startsWith("..")) {
+          val dest = File(sourceOut, relPath)
+          dest.parentFile?.mkdirs()
+          file.copyTo(dest, overwrite = true)
+          manifestEntries.add(relPath)
+        }
+      }
+
+    File(outRoot, "project_source_manifest.txt").writeText(
+      manifestEntries.sorted().joinToString("\n"),
+      Charsets.UTF_8
+    )
+  }
+}
+
+androidComponents {
+  onVariants { variant ->
+    val taskName = "bundleProjectSources${variant.name.replaceFirstChar { it.uppercase() }}"
+    val bundleTask =
+      tasks.register<BundleProjectSourcesTask>(taskName) {
+        rootDirPath.set(rootProject.projectDir.absolutePath)
+        sourceFiles.from(
+          rootProject.file("build.gradle.kts"),
+          rootProject.file("settings.gradle.kts"),
+          rootProject.file("gradle.properties"),
+          rootProject.file("gradle/libs.versions.toml"),
+          project.file("build.gradle.kts"),
+          project.file("proguard-rules.pro"),
+          project.file("src/main/AndroidManifest.xml"),
+          project.fileTree("src/main/java") { include("**/*.kt") },
+          project.fileTree("src/main/res") { include("**/*.xml") }
+        )
+      }
+    variant.sources.assets?.addGeneratedSourceDirectory(
+      bundleTask,
+      BundleProjectSourcesTask::outputDir
+    )
+  }
 }

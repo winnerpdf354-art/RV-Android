@@ -648,7 +648,11 @@ private fun RevisionUniverseRoot(vm: RevisionViewModel) {
                 onSetCardStyle = vm::setCardStyle,
                 apkInfoProvider = vm::getOwnApkInfo,
                 onExportOwnApkToUri = vm::exportOwnApkToUri,
-                onShareOwnApk = vm::shareOwnApk
+                onShareOwnApk = vm::shareOwnApk,
+                projectExportSummaryProvider = vm::getProjectExportSummary,
+                onExportProjectZipAndShare = vm::exportProjectZipAndShare,
+                onSaveProjectZipToDownloads = vm::saveProjectZipToDownloads,
+                onWriteProjectZipToUri = vm::writeProjectZipToUri
             )
         }
 

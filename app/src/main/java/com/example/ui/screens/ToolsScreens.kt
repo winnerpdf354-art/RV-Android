@@ -40,12 +40,17 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.DataObject
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Palette
@@ -90,6 +95,7 @@ import com.example.data.DateUtilsRu
 import com.example.data.ImportExportManager
 import com.example.data.LearningStatus
 import com.example.data.MissingSyllabusSubject
+import com.example.data.ProjectExportManager
 import com.example.data.StudyMode
 import com.example.data.ToolsPage
 import com.example.data.ViewMode
@@ -263,6 +269,15 @@ fun AppSidebarContent(
                 tint = ru.emerald,
                 onClick = { onOpenToolsPage(ToolsPage.AppApk) },
                 testTag = "sidebar_app_apk"
+            )
+            SidebarActionRow(
+                icon = Icons.Default.FolderZip,
+                title = "Export",
+                subtitle = "app_export.zip (source + index.html + data.json)",
+                tint = ru.blue,
+                badge = "ZIP",
+                onClick = { onOpenToolsPage(ToolsPage.ExportProject) },
+                testTag = "sidebar_export_project"
             )
 
             HorizontalDivider(color = ru.cardBorder)
@@ -449,7 +464,11 @@ fun ToolsPagesHost(
     onSetCardStyle: (CardStyle) -> Unit,
     apkInfoProvider: () -> ImportExportManager.AppApkInfo,
     onExportOwnApkToUri: (Uri, (Boolean) -> Unit) -> Unit,
-    onShareOwnApk: ((Boolean) -> Unit) -> Unit
+    onShareOwnApk: ((Boolean) -> Unit) -> Unit,
+    projectExportSummaryProvider: () -> ProjectExportManager.ExportBundleSummary,
+    onExportProjectZipAndShare: ((ProjectExportManager.ZipBuildOutcome) -> Unit) -> Unit,
+    onSaveProjectZipToDownloads: (() -> Unit, (ProjectExportManager.ZipBuildOutcome) -> Unit) -> Unit,
+    onWriteProjectZipToUri: (Uri, (ProjectExportManager.ZipBuildOutcome) -> Unit) -> Unit
 ) {
     BackHandler { onBack() }
 
@@ -527,6 +546,15 @@ fun ToolsPagesHost(
                     onBack = onBack,
                     onSaveToUri = onExportOwnApkToUri,
                     onShareApk = onShareOwnApk
+                )
+            }
+            ToolsPage.ExportProject -> {
+                ExportProjectScreen(
+                    summary = remember(sessionsCount, syllabus) { projectExportSummaryProvider() },
+                    onBack = onBack,
+                    onExportZipAndShare = onExportProjectZipAndShare,
+                    onSaveToDownloads = onSaveProjectZipToDownloads,
+                    onWriteZipToUri = onWriteProjectZipToUri
                 )
             }
         }
@@ -1688,6 +1716,319 @@ private fun AppApkExportScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+// --- Full Project Export Screen ("Export") ---
+
+@Composable
+private fun ExportProjectScreen(
+    summary: ProjectExportManager.ExportBundleSummary,
+    onBack: () -> Unit,
+    onExportZipAndShare: ((ProjectExportManager.ZipBuildOutcome) -> Unit) -> Unit,
+    onSaveToDownloads: (() -> Unit, (ProjectExportManager.ZipBuildOutcome) -> Unit) -> Unit,
+    onWriteZipToUri: (Uri, (ProjectExportManager.ZipBuildOutcome) -> Unit) -> Unit
+) {
+    val ru = LocalRuColors.current
+    var isBuilding by remember { mutableStateOf(false) }
+    var activeAction by remember { mutableStateOf("") }
+    var lastOutcome by remember { mutableStateOf<ProjectExportManager.ZipBuildOutcome?>(null) }
+
+    val saveZipSafLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        if (uri != null) {
+            isBuilding = true
+            activeAction = "Downloads में सेव हो रहा है..."
+            onWriteZipToUri(uri) { outcome ->
+                isBuilding = false
+                activeAction = ""
+                lastOutcome = outcome
+            }
+        } else {
+            isBuilding = false
+            activeAction = ""
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .navigationBarsPadding()
+    ) {
+        ToolsTopBar(
+            title = "Export",
+            subtitle = ProjectExportManager.EXPORT_ZIP_NAME,
+            onBack = onBack
+        )
+
+        Column(
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        ) {
+            // Hero Header Card
+            RuCard(
+                borderColor = ru.blue.copy(alpha = 0.45f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(ru.blue.copy(alpha = 0.16f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FolderZip,
+                                contentDescription = "Export ZIP bundle",
+                                tint = ru.blue,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Complete Project Bundle",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = ProjectExportManager.EXPORT_ZIP_NAME,
+                                fontFamily = JetBrainsMono,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = ru.blue
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "एक ही ZIP फ़ाइल में इस ऐप का पूरा असली Android सोर्स कोड, ऑफ़लाइन चलने वाला सिंगल-फ़ाइल HTML वर्ज़न और आपका पूरा Room डेटाबेस पैक होगा।",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ru.mutedText
+                    )
+
+                    HorizontalDivider(color = ru.cardBorder)
+
+                    ExportContentItemRow(
+                        icon = Icons.Default.Code,
+                        tint = ru.blue,
+                        title = "source/",
+                        detail = "${summary.sourceFileCount} असली प्रोजेक्ट फ़ाइलें (.kt, build.gradle.kts, AndroidManifest.xml, res/*.xml)"
+                    )
+                    ExportContentItemRow(
+                        icon = Icons.Default.Language,
+                        tint = ru.emerald,
+                        title = "index.html",
+                        detail = "पूरा सिंगल-फ़ाइल HTML + CSS + JS वेब ऐप (${summary.formattedWebSizeKb}, localStorage)"
+                    )
+                    ExportContentItemRow(
+                        icon = Icons.Default.DataObject,
+                        tint = ru.amber,
+                        title = "data.json",
+                        detail = "${summary.sessionsCount} सेशन · ${summary.syllabusEntriesCount} सिलेबस · ${summary.labelsCount} लेबल · ${summary.linksCount} लिंक"
+                    )
+                }
+            }
+
+            // Primary Action Card: Big "Export ZIP" + "Save to Downloads"
+            RuCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            isBuilding = true
+                            activeAction = "app_export.zip तैयार हो रही है..."
+                            onExportZipAndShare { outcome ->
+                                isBuilding = false
+                                activeAction = ""
+                                lastOutcome = outcome
+                            }
+                        },
+                        enabled = !isBuilding,
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = ru.blue),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(58.dp)
+                            .testTag("export_project_zip_btn")
+                    ) {
+                        if (isBuilding && activeAction.contains("app_export.zip")) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                strokeWidth = 2.2.dp,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                text = activeAction,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = Color.White
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                text = "Export ZIP",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            isBuilding = true
+                            activeAction = "Downloads में सेव हो रहा है..."
+                            onSaveToDownloads(
+                                {
+                                    saveZipSafLauncher.launch(ProjectExportManager.EXPORT_ZIP_NAME)
+                                }
+                            ) { outcome ->
+                                isBuilding = false
+                                activeAction = ""
+                                lastOutcome = outcome
+                            }
+                        },
+                        enabled = !isBuilding,
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, ru.emerald.copy(alpha = 0.6f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .testTag("save_zip_downloads_btn")
+                    ) {
+                        if (isBuilding && activeAction.contains("Downloads")) {
+                            CircularProgressIndicator(
+                                color = ru.emerald,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(activeAction, color = ru.emerald)
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = null,
+                                tint = ru.emerald,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = "Save to Downloads",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = ru.emerald
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Export ZIP दबाने पर app_export.zip बनते ही फ़ोन का Share Sheet खुल जाएगा। Save to Downloads सीधे आपके फ़ोन के Downloads फ़ोल्डर में app_export.zip सेव करता है।",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ru.mutedText
+                    )
+                }
+            }
+
+            // Last Export Result Feedback Card
+            lastOutcome?.let { res ->
+                val accent = if (res.success) ru.emerald else ru.red
+                RuCard(
+                    borderColor = accent.copy(alpha = 0.5f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("export_project_result_card")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(14.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (res.success) Icons.Default.Verified else Icons.Default.Delete,
+                            contentDescription = null,
+                            tint = accent,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (res.success) "ZIP सफलतापूर्वक तैयार!" else "Export विफल",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = accent
+                            )
+                            Text(
+                                text = if (res.success) {
+                                    "${res.savedLocationLabel} · ${res.formattedSize} · ${res.totalEntries} फ़ाइलें पैक हुईं"
+                                } else {
+                                    res.errorMessage ?: "अज्ञात त्रुटि"
+                                },
+                                fontFamily = JetBrainsMono,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ru.mutedText
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExportContentItemRow(
+    icon: ImageVector,
+    tint: Color,
+    title: String,
+    detail: String
+) {
+    val ru = LocalRuColors.current
+    Row(
+        verticalAlignment = Alignment.Top,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(tint.copy(alpha = 0.14f))
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                fontFamily = JetBrainsMono,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.labelSmall,
+                color = ru.mutedText
+            )
         }
     }
 }

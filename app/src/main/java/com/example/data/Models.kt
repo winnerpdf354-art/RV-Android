@@ -312,6 +312,7 @@ sealed interface ToolsPage {
     data object ExportData : ToolsPage
     data object Appearance : ToolsPage
     data object AppApk : ToolsPage
+    data object ExportProject : ToolsPage
 }
 
 object NoteSerializer {

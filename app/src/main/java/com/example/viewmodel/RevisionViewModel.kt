@@ -23,6 +23,7 @@ import com.example.data.NoteCard
 import com.example.data.NoteLabel
 import com.example.data.NoteSerializer
 import com.example.data.PreferencesRepository
+import com.example.data.ProjectExportManager
 import com.example.data.RevisionRepository
 import com.example.data.SavedLink
 import com.example.data.StudyMode
@@ -1108,6 +1109,91 @@ class RevisionViewModel(application: Application) : AndroidViewModel(application
             onDone(ok)
             if (!ok) {
                 showToast("APK शेयर करने में त्रुटि हुई", ToastTone.ERROR)
+            }
+        }
+    }
+
+    // --- Full Project ZIP Export (source/ + index.html + data.json) ---
+    fun getProjectExportSummary(): ProjectExportManager.ExportBundleSummary {
+        val totalSyllabusRows = syllabus.value.values.sumOf { ch -> ch.values.sumOf { it.size } }
+        return ProjectExportManager.getSummary(
+            context = getApplication(),
+            sessionsCount = sessions.value.size,
+            syllabusEntriesCount = totalSyllabusRows,
+            labelsCount = noteLabels.value.size,
+            linksCount = savedLinks.value.size
+        )
+    }
+
+    private suspend fun buildLiveDatabaseJson(): String {
+        val allSessions = repo.getAllSessionsOnce()
+        val allSyllabus = repo.getSyllabusSnapshot()
+        return ProjectExportManager.buildDatabaseJson(
+            sessions = allSessions,
+            syllabusEntries = allSyllabus,
+            labels = noteLabels.value,
+            links = savedLinks.value,
+            preferences = preferences.value
+        )
+    }
+
+    fun exportProjectZipAndShare(onDone: (ProjectExportManager.ZipBuildOutcome) -> Unit = {}) {
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                val json = buildLiveDatabaseJson()
+                ProjectExportManager.buildZipInCache(app, json)
+            }
+            if (outcome.success && outcome.zipFile != null) {
+                val shared = ProjectExportManager.shareZipFile(app, outcome.zipFile)
+                onDone(outcome)
+                if (shared) {
+                    showToast("app_export.zip तैयार है (${outcome.formattedSize})", ToastTone.SUCCESS)
+                } else {
+                    showToast("ZIP बना पर Share Sheet खोलने में त्रुटि हुई", ToastTone.ERROR)
+                }
+            } else {
+                onDone(outcome)
+                showToast(outcome.errorMessage ?: "app_export.zip बनाने में त्रुटि हुई", ToastTone.ERROR)
+            }
+        }
+    }
+
+    fun saveProjectZipToDownloads(
+        onNeedsSafFallback: () -> Unit,
+        onDone: (ProjectExportManager.ZipBuildOutcome) -> Unit = {}
+    ) {
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                val json = buildLiveDatabaseJson()
+                ProjectExportManager.saveZipDirectlyToDownloadsApi29Plus(app, json)
+            }
+            if (!outcome.success && outcome.errorMessage == "REQUIRES_SAF") {
+                onNeedsSafFallback()
+                return@launch
+            }
+            onDone(outcome)
+            if (outcome.success) {
+                showToast("Downloads/app_export.zip में सेव हो गया", ToastTone.SUCCESS)
+            } else {
+                showToast(outcome.errorMessage ?: "Downloads में सेव करने में त्रुटि हुई", ToastTone.ERROR)
+            }
+        }
+    }
+
+    fun writeProjectZipToUri(uri: Uri, onDone: (ProjectExportManager.ZipBuildOutcome) -> Unit = {}) {
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                val json = buildLiveDatabaseJson()
+                ProjectExportManager.writeZipToUri(app, uri, json)
+            }
+            onDone(outcome)
+            if (outcome.success) {
+                showToast("app_export.zip सेव हो गया (${outcome.formattedSize})", ToastTone.SUCCESS)
+            } else {
+                showToast(outcome.errorMessage ?: "app_export.zip सेव करने में त्रुटि हुई", ToastTone.ERROR)
             }
         }
     }
