@@ -1,0 +1,6 @@
+{
+  "name": "Revision Universe",
+  "description": "Offline-first Hindi and English study, revision tracker, syllabus manager, live timer, and rich study notes app.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
